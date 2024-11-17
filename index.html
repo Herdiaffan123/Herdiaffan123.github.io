@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Split File to VCF</title>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        body {
+            font-family: 'Roboto', Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(to bottom right, #4CAF50, #1e90ff);
+            color: #fff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        .container {
+            background: rgba(0, 0, 0, 0.8);
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+            max-width: 500px;
+            width: 90%;
+            text-align: center;
+        }
+
+        h1 {
+            font-size: 2rem;
+            margin-bottom: 10px;
+            color: #FFD700;
+        }
+
+        p {
+            font-size: 1rem;
+            margin-bottom: 20px;
+            color: #f0f0f0;
+        }
+
+        input[type="file"],
+        input[type="text"],
+        input[type="number"],
+        textarea,
+        select,
+        button {
+            margin: 10px 0;
+            padding: 10px;
+            width: 100%;
+            box-sizing: border-box;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+        }
+
+        input[type="file"],
+        input[type="text"],
+        input[type="number"],
+        textarea {
+            background: #f0f0f0;
+            color: #333;
+        }
+
+        button {
+            background: linear-gradient(to right, #4CAF50, #45a049);
+            color: #fff;
+            cursor: pointer;
+            transition: 0.3s ease;
+        }
+
+        button:hover {
+            background: linear-gradient(to right, #45a049, #3e8e41);
+            transform: translateY(-2px);
+        }
+
+        footer {
+            margin-top: 20px;
+            font-size: 0.8rem;
+            color: #ddd;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Split File to VCF</h1>
+        <p>Upload a .txt, .xlsx, .xls, .csv, or .zip file containing phone numbers.</p>
+        <input type="file" id="fileInput" accept=".txt,.xlsx,.xls,.csv,.zip">
+        <input type="text" id="firstContactName" placeholder="Enter the name of the first contact">
+        <textarea id="adminNumbers" rows="4" placeholder="Enter Admin phone numbers (comma-separated)"></textarea>
+        <input type="text" id="adminName" placeholder="Enter Admin name (default: Admin)">
+        <input type="number" id="splitCount" placeholder="Contacts per file (default: 100)" min="1">
+        <input type="text" id="fileName" placeholder="Enter desired base file name (default: contacts)">
+        <button onclick="convertAndSplitToVCF()">Convert and Split</button>
+        <footer>&copy; 2024 Split File to VCF Converter</footer>
+    </div>
+
+    <script>
+        async function convertAndSplitToVCF() {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+            const firstContactName = document.getElementById('firstContactName').value.trim();
+            const adminNumbersInput = document.getElementById('adminNumbers').value.trim();
+            const adminNameBase = document.getElementById('adminName').value.trim() || 'Admin';
+            const splitCountInput = parseInt(document.getElementById('splitCount').value.trim());
+            const splitCount = isNaN(splitCountInput) ? 100 : splitCountInput;
+            const adminNumbers = adminNumbersInput ? adminNumbersInput.split(',').map(num => num.trim()) : [];
+            const fileNameInput = document.getElementById('fileName').value.trim();
+            const baseFileName = fileNameInput || 'contacts';
+
+            if (!file) {
+                alert("Please upload a valid file (.txt, .xlsx, .xls, .csv, .zip).");
+                return;
+            }
+
+            if (!firstContactName) {
+                alert("Please enter the name for the first contact.");
+                return;
+            }
+
+            if (file.name.endsWith('.zip')) {
+                const zip = new JSZip();
+                const zipContent = await zip.loadAsync(file);
+
+                const fileEntries = Object.values(zipContent.files).filter(entry => !entry.dir);
+                const phoneNumbers = [];
+
+                for (const entry of fileEntries) {
+                    if (entry.name.endsWith('.txt') || entry.name.endsWith('.csv')) {
+                        const textContent = await entry.async('string');
+                        phoneNumbers.push(...textContent.split('\n').filter(line => line.trim() !== ''));
+                    } else if (entry.name.endsWith('.xlsx') || entry.name.endsWith('.xls')) {
+                        const data = new Uint8Array(await entry.async('arraybuffer'));
+                        const workbook = XLSX.read(data, { type: 'array' });
+                        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                        const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+                        phoneNumbers.push(...rows.flat().filter(cell => typeof cell === 'string' && cell.trim() !== ''));
+                    }
+                }
+
+                splitVCF(phoneNumbers, firstContactName, adminNumbers, adminNameBase, baseFileName, splitCount);
+            } else {
+                const reader = new FileReader();
+
+                if (file.name.endsWith('.txt') || file.name.endsWith('.csv')) {
+                    reader.onload = function (event) {
+                        const content = event.target.result;
+                        const lines = content.split('\n').filter(line => line.trim() !== '');
+                        splitVCF(lines, firstContactName, adminNumbers, adminNameBase, baseFileName, splitCount);
+                    };
+                    reader.readAsText(file);
+                } else if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+                    reader.onload = function (event) {
+                        const data = new Uint8Array(event.target.result);
+                        const workbook = XLSX.read(data, { type: 'array' });
+                        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                        const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+                        const phoneNumbers = rows.flat().filter(cell => typeof cell === 'string' && cell.trim() !== '');
+                        splitVCF(phoneNumbers, firstContactName, adminNumbers, adminNameBase, baseFileName, splitCount);
+                    };
+                    reader.readAsArrayBuffer(file);
+                } else {
+                    alert("Unsupported file type. Please upload .txt, .xlsx, .xls, .csv, or .zip files.");
+                }
+            }
+        }
+
+        function splitVCF(lines, firstContactName, adminNumbers, adminNameBase, baseFileName, splitCount) {
+            let contactIndex = 0;
+            let adminIndex = 1;
+            let clientIndex = 1;
+            let adminContacts = [];
+            let clientContacts = [];
+
+            for (let i = 0; i < lines.length; i++) {
+                const phone = lines[i].trim();
+                let contactName;
+
+                if (adminNumbers.includes(phone)) {
+                    contactName = `${adminNameBase}${adminIndex}`;
+                    adminIndex++;
+                    adminContacts.push({ name: contactName, phone });
+                } else {
+                    contactName = `${firstContactName}${clientIndex}`;
+                    clientIndex++;
+                    clientContacts.push({ name: contactName, phone });
+                }
+            }
+
+            // Split Admin Contacts
+            splitAndDownloadVCF(adminContacts, baseFileName, "admin", splitCount);
+
+            // Split Client Contacts
+            splitAndDownloadVCF(clientContacts, baseFileName, "client", splitCount);
+        }
+
+        function splitAndDownloadVCF(contacts, baseFileName, type, splitCount) {
+            let contactIndex = 0;
+            for (let i = 0; i < contacts.length; i += splitCount) {
+                const chunk = contacts.slice(i, i + splitCount);
+                let vcfContent = '';
+                chunk.forEach(contact => {
+                    vcfContent += `BEGIN:VCARD\nVERSION:3.0\nFN:${contact.name}\nTEL:${contact.phone}\nEND:VCARD\n\n`;
+                });
+
+                if (vcfContent) {
+                    const blob = new Blob([vcfContent], { type: 'text/vcard' });
+                    const link = document.createElement('a');
+                    link.href = URL.createObjectURL(blob);
+
+                    link.download = `${baseFileName}_${type}_${Math.ceil((i + 1) / splitCount)}.vcf`;
+                    link.click();
+                }
+            }
+        }
+    </script>
+</body>
+</html>
